@@ -40,6 +40,7 @@ struct ffm_model
     ffm_int m;
     ffm_int k;
     ffm_float *W;
+    ffm_float *WP;
     ffm_float *WL;
     ffm_float *WB;
     unordered_set<ffm_int> tr_feat_idx;

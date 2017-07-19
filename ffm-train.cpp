@@ -9,6 +9,8 @@
 
 #include "ffm.h"
 
+#include <fenv.h>
+
 using namespace std;
 using namespace ffm;
 
@@ -282,6 +284,7 @@ int train_on_disk(Option opt)
 
 int main(int argc, char **argv)
 {
+    feenableexcept(FE_ALL_EXCEPT & ~FE_INEXACT);
     Option opt;
     try
     {
@@ -292,7 +295,6 @@ int main(int argc, char **argv)
         cout << e.what() << endl;
         return 1;
     }
-
     if(opt.on_disk)
     {
         return train_on_disk(opt);
@@ -301,4 +303,5 @@ int main(int argc, char **argv)
     {
         return train(opt);
     }
+
 }

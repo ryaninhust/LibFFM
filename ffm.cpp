@@ -36,6 +36,13 @@ inline float qrsqrt(float x)
     return x;
 }
 
+ffm_int const kBIN_SIZE = (1 << 24) - 1;
+
+inline ffm_int hash_idx(ffm_int a, ffm_int b)
+{
+    return (((((ffm_long)a+b)*(a+b+1)>>1)+b) % kBIN_SIZE);
+}
+
 ffm_float calc_w_norm2(ffm_model &model)
 {
     ffm_float w_norm2 = 0.0;
@@ -71,7 +78,7 @@ inline ffm_float wTx(
 
     __m128 XMMt = _mm_setzero_ps();
 
-    ffm_float t = 0, linear = 0;
+    ffm_float t = 0, linear = 0, poly2 = 0;
     for(ffm_node *N1 = begin; N1 != end; N1++)
     {
         ffm_int j1 = N1->j;
@@ -106,7 +113,24 @@ inline ffm_float wTx(
             ffm_float *w1 = model.W + j1*align1 + f2*align0;
             ffm_float *w2 = model.W + j2*align1 + f1*align0;
 
-            __m128 XMMv = _mm_set1_ps(v1*v2*r);
+            ffm_int hidx = hash_idx(j1, j2);
+            ffm_float &wp = model.WP[2*hidx];
+            ffm_float pair_v = v1*v2*r;
+
+            if(do_update)
+            {
+                ffm_float &wpg = model.WP[2*hidx+1];
+                ffm_float g = lambda*wl + kappa * pair_v;
+                wpg += g * g;
+                wp -= eta * qrsqrt(wpg) * g;
+            }
+            else
+            {
+                t+= wp*pair_v;
+                poly2 += wp*pair_v;
+            }
+
+            __m128 XMMv = _mm_set1_ps(pair_v);
 
             if(do_update)
             {
@@ -215,6 +239,9 @@ ffm_model* init_model(ffm_int n, ffm_int m, ffm_parameter param)
     model->k = k_aligned;
     model->m = m;
     model->W = nullptr;
+    model->WL = nullptr;
+    model->WB = nullptr;
+    model->WP = nullptr;
     model->normalization = param.normalization;
     
     try
@@ -222,6 +249,7 @@ ffm_model* init_model(ffm_int n, ffm_int m, ffm_parameter param)
         model->W = malloc_aligned_float((ffm_long)n*m*k_aligned*2);
         model->WL = malloc_aligned_float(n*2);
         model->WB = malloc_aligned_float(2);
+        model->WP = malloc_aligned_float(2*kBIN_SIZE);
     }
     catch(bad_alloc const &e)
     {
@@ -252,6 +280,11 @@ ffm_model* init_model(ffm_int n, ffm_int m, ffm_parameter param)
     {
         model->WL[j * 2] = 0;
         model->WL[j * 2 + 1] = 1;
+    }
+
+    for (ffm_int j2 = 0; j2 < kBIN_SIZE; j2++) {
+        model->WP[2*j2] = 0;
+        model->WP[2*j2+1] = 1;
     }
 
     model->WB[0] = 0;
@@ -1067,6 +1100,14 @@ ffm_int ffm_save_model(ffm_model *model, char const *path, ffm_int &param_k)
             f_out << "\n";
         }
     }
+
+    for(ffm_int j = 0; j < kBIN_SIZE; j++) {
+        f_out << "wp" << j << " ";
+        f_out << model->WP[j*2] << "\n";
+        f_out << "np" << j << " ";
+        f_out << model->WP[j*2+1] << "\n";
+    }
+
     for(ffm_int j = 0; j < model->n; j++) {
         f_out << "wl" << j << " ";
         f_out << model->WL[j*2] << "\n";
@@ -1113,6 +1154,7 @@ ffm_model* ffm_load_model(char const *path)
         model->W = malloc_aligned_float((ffm_long)model->m*model->n*k_aligned*2);
         model->WL = malloc_aligned_float(model->n*2);
         model->WB = malloc_aligned_float(2);
+        model->WP = malloc_aligned_float(2*kBIN_SIZE);
     }
     catch(bad_alloc const &e)
     {
@@ -1137,6 +1179,16 @@ ffm_model* ffm_load_model(char const *path)
                 f_in >> *ptr;
         }
     }
+
+    ptr = model->WP;
+    for(ffm_int j = 0; j < kBIN_SIZE; j++, ptr++) {
+        f_in >> dummy;
+        f_in >> *ptr;
+        ptr++;
+        f_in >> dummy;
+        f_in >> *ptr;
+    }
+
     ptr = model->WL;
     for(ffm_int j = 0; j < model->n; j++, ptr++) {
         f_in >> dummy;
@@ -1161,12 +1213,14 @@ void ffm_destroy_model(ffm_model **model)
         return;
 #ifdef _WIN32
     _aligned_free((*model)->W);
-    _aligned_free((*model)->WL);
+    _aligned_free((Pmodel)->WL);
     _aligned_free((*model)->WB);
+    _aligned_free((*model)->WP);
 #else
     free((*model)->W);
     free((*model)->WL);
     free((*model)->WB);
+    free((*model)->WP);
 #endif
     delete *model;
     *model = nullptr;
@@ -1209,10 +1263,12 @@ ffm_model* ffm_train_with_validation(ffm_problem *tr, ffm_problem *va, ffm_param
     model_ret->W = model->W;
     model_ret->WL = model->WL;
     model_ret->WB = model->WB;
+    model_ret->WP = model->WP;
 
     model->W = nullptr;
     model->WL = nullptr;
     model->WB = nullptr;
+    model->WP = nullptr;
 
     return model_ret;
 }
@@ -1242,10 +1298,12 @@ ffm_model* ffm_train_with_validation_on_disk(
     model_ret->W = model->W;
     model_ret->WL = model->WL;
     model_ret->WB = model->WB;
+    model_ret->WP = model->WP;
 
     model->W = nullptr;
     model->WL = nullptr;
     model->WB = nullptr;
+    model->WP = nullptr;
 
     return model_ret;
 }
