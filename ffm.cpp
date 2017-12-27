@@ -313,11 +313,22 @@ shared_ptr<ffm_model> train(
 
             ffm_float t = wTx(begin, end, r, *model);
 
-            ffm_float expnyt = exp(-y*t);
+            ffm_float yt = y*t;
 
-            tr_loss += log(1+expnyt);
-               
-            ffm_float kappa = -y*expnyt/(1+expnyt);
+            ffm_float exp_m, sigma;
+
+            if (yt > 0) {
+                exp_m = exp(-yt);
+                sigma = exp_m/(1+exp_m);
+                tr_loss += log(1+exp_m);
+            }
+            else {
+                exp_m = exp(yt);
+                sigma = 1/(1+exp_m);
+                tr_loss += -yt+log(1+exp_m);
+            }
+
+            ffm_float kappa = -y*sigma;
 
             wTx(begin, end, r, *model, kappa, param.eta, param.lambda, true);
         }
@@ -597,11 +608,22 @@ shared_ptr<ffm_model> train_on_disk(
 
                 ffm_float t = wTx(begin, end, r, *model);
 
-                ffm_float expnyt = exp(-y*t);
+                ffm_float yt = y*t;
 
-                tr_loss += log(1+expnyt);
-                   
-                ffm_float kappa = -y*expnyt/(1+expnyt);
+                ffm_float exp_m, sigma;
+
+                if (yt > 0) {
+                    exp_m = exp(-yt);
+                    sigma = exp_m/(1+exp_m);
+                    tr_loss += log(1+exp_m);
+                }
+                else {
+                    exp_m = exp(yt);
+                    sigma = 1/(1+exp_m);
+                    tr_loss += -yt+log(1+exp_m);
+                }
+
+                ffm_float kappa = -y*sigma;
 
                 wTx(begin, end, r, *model, kappa, param.eta, param.lambda, true);
             }
