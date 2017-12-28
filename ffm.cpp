@@ -286,6 +286,8 @@ shared_ptr<ffm_model> train(
         if(va != nullptr && va->l != 0)
         {
             cout.width(13);
+            cout << "va_logloss";
+            cout.width(13);
             cout << "va_aucloss";
         }
         cout << endl;
@@ -346,7 +348,8 @@ shared_ptr<ffm_model> train(
             {
                 vector<ffm_float> va_scores(va->l, 0);
                 vector<ffm_int> va_orders(va->l, 0);
-#pragma omp parallel for schedule(static)
+                ffm_float loss = 0.0;
+#pragma omp parallel for schedule(static) reduction(+: loss)
                 for(ffm_long i = 0; i < va->l; i++)
                 {
                     ffm_node *begin = &va->X[va->P[i]];
@@ -379,6 +382,19 @@ shared_ptr<ffm_model> train(
                     ffm_float t = wTx(begin, end, r, *model);
 
                     t += missed_bias;
+
+                    ffm_float yt = va->Y[i]*t;
+
+                    ffm_float exp_m;
+
+                    if (yt > 0) {
+                        exp_m = exp(-yt);
+                        loss += log(1+exp_m);
+                    }
+                    else {
+                        exp_m = exp(yt);
+                        loss += -yt+log(1+exp_m);
+                    }
 
                     va_scores[i] = t;
                     va_orders[i] = i;
@@ -419,6 +435,8 @@ shared_ptr<ffm_model> train(
                 sum_pos_rank += stuck_pos*(begin+begin-1+stuck_pos+stuck_neg)*0.5;
                 ffm_float auc_loss = (sum_pos_rank - 0.5*M*(M+1)) / (M*N);
 
+                cout.width(13);
+                cout << fixed << setprecision(5) << loss/va->l;
                 cout.width(13);
                 cout << fixed << setprecision(5) << auc_loss;
 
@@ -556,6 +574,8 @@ shared_ptr<ffm_model> train_on_disk(
         if(!va_path.empty())
         {
             cout.width(13);
+            cout << "va_logloss";
+            cout.width(13);
             cout << "va_aucloss";
         }
         cout << endl;
@@ -645,6 +665,7 @@ shared_ptr<ffm_model> train_on_disk(
                 ffm_int va_l = 0;
                 ffm_int base_l = 0;
                 ffm_double va_loss = 0;
+                ffm_double loss = 0;
                 vector<ffm_float> va_scores;
                 vector<ffm_float> va_Y;
                 vector<ffm_int> va_orders;
@@ -673,7 +694,7 @@ shared_ptr<ffm_model> train_on_disk(
                     fread(X.data(), sizeof(ffm_node), P[l], f_va);
 
 #if defined USEOMP
-#pragma omp parallel for schedule(static)
+#pragma omp parallel for schedule(static) reduction(+: loss)
 #endif
                     for(ffm_int i = 0; i < l; i++)
                     {
@@ -711,6 +732,19 @@ shared_ptr<ffm_model> train_on_disk(
                         ffm_float t = wTx(begin, end, r, *model);
 
                         t += missed_bias;
+
+                        ffm_float yt = y*t;
+
+                        ffm_float exp_m;
+
+                        if (yt > 0) {
+                            exp_m = exp(-yt);
+                            loss += log(1+exp_m);
+                        }
+                        else {
+                            exp_m = exp(yt);
+                            loss += -yt+log(1+exp_m);
+                        }
 
                         va_scores[base_l+i] = t;
                         va_orders[base_l+i] = base_l+i;
@@ -756,6 +790,8 @@ shared_ptr<ffm_model> train_on_disk(
                 ffm_float auc_loss = (sum_pos_rank - 0.5*M*(M+1)) / (M*N);
 
 
+                cout.width(13);
+                cout << fixed << setprecision(5) << loss/base_l;
                 cout.width(13);
                 cout << fixed << setprecision(5) << auc_loss;
 
